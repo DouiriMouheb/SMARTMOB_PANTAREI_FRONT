@@ -15,17 +15,88 @@ const useAcquisizioniRealtime = () => {
   const [error, setError] = useState(null);
   const [connectionId, setConnectionId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const selectedLineaRef = useRef(null);
+  const selectedPostazioneRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const maxReconnectAttempts = 5;
   const reconnectAttemptRef = useRef(0);
+  const subscribeSupportedRef = useRef(null); // null = unknown, false = not supported, true = supported
+  const subscribeMethodRef = useRef(null); // store the working method name or false
+  const subscribeCandidates = [
+    'SubscribeToLineaPostazione',
+    'SubscribeLineaPostazione',
+    'SubscribeToPostazione',
+    'Subscribe',
+    'SubscribeToLineaEPostazione'
+  ];
+
+  // Try to subscribe using several candidate method names. Cache the successful one.
+  const trySubscribe = useCallback(async (hub, linea, postazione) => {
+    if (!hub || !linea || !postazione) return false;
+
+    // If we've already determined there's no supported method, skip
+    if (subscribeMethodRef.current === false) return false;
+
+    // If we already have a working method, try it directly
+    if (typeof subscribeMethodRef.current === 'string') {
+      try {
+        await hub.invoke(subscribeMethodRef.current, linea, postazione);
+        subscribeSupportedRef.current = true;
+        return true;
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (msg.includes('Method does not exist') || msg.includes('HubException')) {
+          // fall through to try other candidates
+          subscribeMethodRef.current = null;
+          subscribeSupportedRef.current = null;
+        } else {
+          console.warn('Subscribe attempt failed for method', subscribeMethodRef.current, err);
+          return false;
+        }
+      }
+    }
+
+    // Probe candidates
+    for (const candidate of subscribeCandidates) {
+      try {
+        await hub.invoke(candidate, linea, postazione);
+        subscribeMethodRef.current = candidate;
+        subscribeSupportedRef.current = true;
+        console.log('Subscribed using hub method:', candidate);
+        return true;
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (msg.includes('Method does not exist') || msg.includes('HubException')) {
+          // try next candidate
+          continue;
+        }
+        // other errors, log and stop
+        console.warn('Error invoking candidate subscribe method', candidate, err);
+        return false;
+      }
+    }
+
+    // none succeeded
+    subscribeMethodRef.current = false;
+    subscribeSupportedRef.current = false;
+    console.debug('No subscribe method available on hub');
+    return false;
+  }, []);
 
   // Fetch initial data from REST API
-  const fetchInitialData = useCallback(async () => {
+  const fetchInitialData = useCallback(async (linea = null, postazione = null) => {
     try {
       setIsLoading(true);
       setError(null);
-      
-      const data = await acquisizioniService.getLatestAcquisizioni();
+      // If linea/postazione are not provided, we should not call the generic /latest endpoint
+      // because the server expects a specific selection and may return 400. Instead, clear data.
+      if (!linea || !postazione) {
+        setAcquisizioni([]);
+        setLastUpdated(null);
+        return;
+      }
+
+      const data = await acquisizioniService.getLatestSingleAcquisizione(linea, postazione);
       setAcquisizioni(data);
       setLastUpdated(new Date().toISOString());
       
@@ -94,8 +165,8 @@ const useAcquisizioniRealtime = () => {
       console.log('SignalR reconnected with ID:', connectionId);
       toast.success('Riconnesso con successo!', { id: 'reconnecting' });
       
-      // Fetch fresh data after reconnection
-      fetchInitialData();
+      // Fetch fresh data after reconnection using stored selection refs (if present)
+      fetchInitialData(selectedLineaRef.current, selectedPostazioneRef.current);
     });
 
     // Listen for real-time events
@@ -109,8 +180,9 @@ const useAcquisizioniRealtime = () => {
       console.log('🔄 AcquisizioniUpdated event received:', data);
       console.log('📊 Data type:', typeof data, 'Is Array:', Array.isArray(data));
       try {
-        const newAcquisizioni = Array.isArray(data) ? data : [data];
-        console.log('📋 Processing acquisizioni:', newAcquisizioni.length, 'records');
+        const raw = Array.isArray(data) ? data : [data];
+        const newAcquisizioni = raw.map(item => acquisizioniService.normalizeAcquisizione(item));
+        console.log('📋 Processing acquisizioni:', newAcquisizioni.length, 'records (normalized)');
         setAcquisizioni(newAcquisizioni);
         setLastUpdated(new Date().toISOString());
        
@@ -124,10 +196,11 @@ const useAcquisizioniRealtime = () => {
     hubConnection.on('NewAcquisizione', (data) => {
       console.log('➕ NewAcquisizione event received:', data);
       try {
+        const rawRecord = Array.isArray(data) ? data[0] : data;
+        const newRecord = acquisizioniService.normalizeAcquisizione(rawRecord);
         setAcquisizioni(prev => {
-          const newRecord = Array.isArray(data) ? data[0] : data;
           const updated = [newRecord, ...prev];
-          console.log('➕ Added new record, total:', updated.length);
+          console.log('➕ Added new normalized record, total:', updated.length);
           return updated;
         });
         setLastUpdated(new Date().toISOString());
@@ -174,8 +247,18 @@ const useAcquisizioniRealtime = () => {
       console.log('SignalR connected successfully');
       toast.success('Connesso al server in tempo reale');
       
-      // Fetch initial data after successful connection
-      await fetchInitialData();
+  // Fetch initial data after successful connection
+      await fetchInitialData(selectedLineaRef.current, selectedPostazioneRef.current);
+
+      // If we already have a selected linea/postazione (set by refreshData or UI), subscribe on the hub so server will push updates
+      if (selectedLineaRef.current && selectedPostazioneRef.current) {
+        try {
+          // best-effort - don't block overall connect if subscribe fails
+          await trySubscribe(hubConnection, selectedLineaRef.current, selectedPostazioneRef.current);
+        } catch (err) {
+          console.warn('Auto-subscribe failed:', err);
+        }
+      }
       
     } catch (err) {
       console.error('SignalR connection failed:', err);
@@ -235,20 +318,41 @@ const useAcquisizioniRealtime = () => {
 
   // Send message to hub (if needed for future functionality)
   const sendMessage = useCallback(async (method, ...args) => {
-    if (connection && connectionState === 'Connected') {
-      try {
-        await connection.invoke(method, ...args);
-        return true;
-      } catch (err) {
-        console.error('Error sending message:', err);
-        toast.error('Errore nell\'invio del messaggio');
+    if (!(connection && connectionState === 'Connected' && connection.state === 'Connected')) {
+      // Connection not ready
+      return false;
+    }
+
+    try {
+      await connection.invoke(method, ...args);
+      // If we successfully invoked a subscribe method, mark it supported
+      if (method === 'SubscribeToLineaPostazione') subscribeSupportedRef.current = true;
+      return true;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      console.error('Error sending message:', err);
+
+      // If the server reports the method doesn't exist, record that and suppress toast noise
+      if (msg.includes('Method does not exist') || msg.includes('HubException')) {
+        if (method === 'SubscribeToLineaPostazione') {
+          subscribeSupportedRef.current = false;
+        }
+        console.debug('Hub method not supported:', method, msg);
         return false;
       }
-    } else {
-      toast.error('Connessione non disponibile');
+
+      toast.error('Errore nell\'invio del messaggio');
       return false;
     }
   }, [connection, connectionState]);
+
+  // Refresh data helper (can pass linea/postazione to target a single latest)
+  const refreshData = useCallback(async (linea = null, postazione = null) => {
+    // store refs so connect will reuse them
+    selectedLineaRef.current = linea;
+    selectedPostazioneRef.current = postazione;
+    await fetchInitialData(linea, postazione);
+  }, [fetchInitialData]);
 
   // Initialize connection on mount
   useEffect(() => {
@@ -290,7 +394,8 @@ const useAcquisizioniRealtime = () => {
     disconnect,
     reconnect,
     sendMessage,
-    refreshData: fetchInitialData,
+    refreshData,
+    subscribe: (linea, postazione) => trySubscribe(connection, linea, postazione),
     
     // Status helpers
     isConnected: connectionState === 'Connected',

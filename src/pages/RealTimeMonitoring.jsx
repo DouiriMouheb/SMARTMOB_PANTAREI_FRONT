@@ -35,16 +35,29 @@ const RealtimeLatestSingle = () => {
     connectionState,
     reconnect,
     sendMessage,
+    subscribe,
+    refreshData,
     lastUpdated,
     recordCount,
   } = useAcquisizioniRealtime();
 
   // Subscribe to selected linea/postazione on change
   useEffect(() => {
-    if (selectedLinea && selectedPostazione && sendMessage) {
-      sendMessage('SubscribeToLineaPostazione', selectedLinea, selectedPostazione);
+    if (selectedLinea && selectedPostazione) {
+      // Fetch the latest single for the current selection immediately
+      if (typeof refreshData === 'function') {
+        refreshData(selectedLinea, selectedPostazione);
+      }
+
+      // Ask the hook to subscribe to the selected linea/postazione using a discovered method name
+      if (typeof subscribe === 'function') {
+        subscribe(selectedLinea, selectedPostazione);
+      } else if (sendMessage) {
+        // fallback to best-effort direct send
+        sendMessage('SubscribeToLineaPostazione', selectedLinea, selectedPostazione);
+      }
     }
-  }, [selectedLinea, selectedPostazione, sendMessage]);
+  }, [selectedLinea, selectedPostazione, sendMessage, refreshData]);
 
   // Filter real-time data for selected linea/postazione
   const latestData = acquisizioni.find(
