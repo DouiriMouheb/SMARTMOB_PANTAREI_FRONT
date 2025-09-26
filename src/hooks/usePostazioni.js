@@ -15,6 +15,7 @@ export const usePostazioni = () => {
       setData(result)
     } catch (err) {
       setError(err.message)
+      setData([]) // Always set data to empty array on error
       console.error('Error fetching postazioni:', err)
     } finally {
       setLoading(false)

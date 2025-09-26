@@ -4,7 +4,7 @@ import Modal from '../components/Modal'
 import { Monitor, Loader2, AlertCircle, Calendar, Plus, Edit, Trash2, ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 
 function Postazioni() {
-  const { data, loading, error, refetch, createPostazione, updatePostazione, deletePostazione } = usePostazioni()
+  const { data, loading, error, createPostazione, updatePostazione, deletePostazione } = usePostazioni()
   const [modalOpen, setModalOpen] = useState(false)
   const [createMode, setCreateMode] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -32,7 +32,7 @@ function Postazioni() {
   }, [itemsPerPage, searchTerm])
 
   // Filter data based on search term
-  const filteredData = data.filter(item => {
+  const filteredData = Array.isArray(data) ? data.filter(item => {
     if (!searchTerm) return true
 
     const searchLower = searchTerm.toLowerCase()
@@ -41,7 +41,7 @@ function Postazioni() {
       item.codPostazione?.toLowerCase().includes(searchLower) ||
       new Date(item.dataInserimento).toLocaleString('it-IT').toLowerCase().includes(searchLower)
     )
-  })
+  }) : [];
 
   // Calculate pagination with filtered data
   const totalItems = filteredData.length
@@ -130,6 +130,7 @@ function Postazioni() {
         await deletePostazione(deleteConfirm.codLineaProd, deleteConfirm.codPostazione)
         setShowDeleteConfirm(false)
         setDeleteConfirm(null)
+        handleCloseModal(); // Close the main modal after delete
       } catch (error) {
         console.error('Error deleting postazione:', error)
       } finally {
@@ -230,15 +231,17 @@ function Postazioni() {
         <p className="text-sm sm:text-base text-gray-600 p-2">Gestisci le postazioni del sistema</p>
 
         {/* Add Button */}
-        <div className="flex justify-end mt-4">
-          <button
-            onClick={handleCreateNew}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus size={16} className="mr-2" />
-            Nuova Postazione
-          </button>
-        </div>
+        {!error && (
+          <div className="flex justify-end mt-4">
+            <button
+              onClick={handleCreateNew}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus size={16} className="mr-2" />
+              Nuova Postazione
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Loading State */}
@@ -249,15 +252,16 @@ function Postazioni() {
         </div>
       )}
 
-      {/* Error State */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <div className="flex items-center">
-            <AlertTriangle className="w-5 h-5 text-red-500 mr-2" />
-            <span className="text-red-700">Errore nel caricamento dei dati: {error}</span>
-          </div>
-        </div>
-      )}
+      {/* Error State - Centered message if fetch fails */}
+     {error && (
+             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+               <div className="flex items-center">
+                 <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
+                 <span className="text-red-700">Errore nel caricamento dei dati: {error}</span>
+               </div>
+             </div>
+           )}
+ 
 
       {/* Results Table */}
       {!loading && !error && (
@@ -344,9 +348,7 @@ function Postazioni() {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Data Inserimento
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Azioni
-                          </th>
+                        
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -372,31 +374,7 @@ function Postazioni() {
                                 {new Date(item.dataInserimento).toLocaleString('it-IT')}
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  onClick={() => handleView(item)}
-                                  className="p-1 text-gray-600 hover:text-gray-800 transition-colors"
-                                  title="Visualizza"
-                                >
-                                  <Monitor size={16} />
-                                </button>
-                                <button
-                                  onClick={() => handleEdit(item)}
-                                  className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
-                                  title="Modifica"
-                                >
-                                  <Edit size={16} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteClick(item)}
-                                  className="p-1 text-red-600 hover:text-red-800 transition-colors"
-                                  title="Elimina"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </td>
+                         
                           </tr>
                         ))}
                       </tbody>

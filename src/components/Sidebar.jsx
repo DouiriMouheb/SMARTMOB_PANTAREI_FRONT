@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Database, Monitor } from 'lucide-react';
+import { Menu, X, Database, Monitor, Radio } from 'lucide-react';
 
 const navItems = [
   { to: '/acquisizioni', label: 'Acquisizioni', icon: Database },
   { to: '/postazioni', label: 'Postazioni', icon: Monitor },
+  { to: '/realtime-monitoring', label: 'Monitoraggio', icon: Radio },
 ];
 
 const Sidebar = ({ open, setOpen }) => {

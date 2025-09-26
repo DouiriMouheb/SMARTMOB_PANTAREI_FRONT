@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast'
 import MainLayout from './layouts/MainLayout'
 import Acquisizioni from './pages/Acquisizioni'
 import Postazioni from './pages/Postazioni'
+import RealTimeMonitoring from './pages/RealTimeMonitoring'
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
           <Route path="/" element={<Acquisizioni />} />
           <Route path="/acquisizioni" element={<Acquisizioni />} />
           <Route path="/postazioni" element={<Postazioni />} />
+          <Route path="/realtime-monitoring" element={<RealTimeMonitoring />} />
         </Routes>
       </MainLayout>
       <Toaster position="top-right" />
