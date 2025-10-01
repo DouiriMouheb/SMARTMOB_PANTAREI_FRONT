@@ -35,6 +35,27 @@ const Sidebar = ({ open, setOpen }) => {
           );
         })}
       </nav>
+
+      {/* Logo footer at the bottom: full-width white bar 
+      <div className="mt-auto w-full">
+        {open ? (
+          <div className="w-full bg-white flex items-center justify-center py-3 ">
+            <img
+              src="/logoFab.png"
+              alt="Smartmob Pantarei"
+              className="w-32 h-auto"
+            />
+          </div>
+        ) : (
+          <div className="w-full bg-white flex items-center justify-center py-2">
+            <img
+              src="/logoSmallFab.png"
+              alt="Logo"
+              className="w-6 h-6"
+            />
+          </div>
+        )}
+      </div>*/}
     </aside>
   );
 };
