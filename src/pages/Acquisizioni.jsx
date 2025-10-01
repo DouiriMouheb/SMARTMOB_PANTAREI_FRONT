@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Database, ChevronDown, Loader2, AlertCircle, Calendar, Package, Eye, ChevronLeft, ChevronRight, Search, X, FileBox, Newspaper } from 'lucide-react';
+import Modal from '../components/Modal';
+import { Database, ChevronDown, Loader2, AlertCircle, Calendar, Package, Eye, ChevronLeft, ChevronRight, Search, X, FileBox, Newspaper, Camera } from 'lucide-react';
 import { useLineePostazioni } from '../hooks/useLineePostazioni';
 import { useAcquisizioniFilter } from '../hooks/useAcquisizioniFilter';
 
@@ -38,19 +39,43 @@ const Acquisizioni = () => {
     setCurrentPage(1);
   }, [selectedLinea, selectedPostazione, itemsPerPage, searchTerm]);
 
-  // Filter data based on search term
+  // Filter data based on search term — scan all fields (including nested) for a match
   const filteredData = acquisizioniData.filter(item => {
     if (!searchTerm) return true;
 
     const searchLower = searchTerm.toLowerCase();
-    return (
-      item.id?.toString().toLowerCase().includes(searchLower) ||
-      item.codicE_ARTICOLO?.toLowerCase().includes(searchLower) ||
-      item.codicE_ORDINE?.toLowerCase().includes(searchLower) ||
-      (item.esitO_CQ_ARTICOLO ? 'positivo' : 'negativo').includes(searchLower) ||
-      item.scostamentO_CQ_ARTICOLO?.toString().includes(searchLower) ||
-      new Date(item.dT_INS).toLocaleString('it-IT').toLowerCase().includes(searchLower)
-    );
+
+    // Helper: recursively walk item and collect textual representations
+    const seen = new Set();
+    const parts = [];
+    const walk = (val) => {
+      if (val === null || val === undefined) return;
+      // avoid circular
+      if (typeof val === 'object') {
+        if (seen.has(val)) return;
+        seen.add(val);
+        // handle Date objects
+        if (val instanceof Date) {
+          parts.push(val.toLocaleString('it-IT'));
+          return;
+        }
+        for (const k of Object.keys(val)) {
+          try { walk(val[k]); } catch (e) { /* ignore */ }
+        }
+        return;
+      }
+      if (typeof val === 'boolean') {
+        parts.push(val ? 'positivo' : 'negativo');
+        return;
+      }
+      // numbers, strings, etc.
+      parts.push(String(val));
+    };
+
+    walk(item);
+
+    const haystack = parts.join(' ').toLowerCase();
+    return haystack.includes(searchLower);
   });
 
   // Calculate pagination with filtered data
@@ -67,6 +92,25 @@ const Acquisizioni = () => {
   const handleItemsPerPageChange = (newItemsPerPage) => {
     setItemsPerPage(newItemsPerPage);
     setCurrentPage(1);
+  };
+
+  // Modal for item details
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState(null);
+
+  // Image states for modal
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  const openDetail = (item) => {
+    setDetailItem(item);
+    setDetailOpen(true);
+  };
+
+  const closeDetail = () => {
+    setDetailOpen(false);
+    setDetailItem(null);
   };
 
   return (
@@ -278,7 +322,10 @@ const Acquisizioni = () => {
                                 Esito CQ
                               </th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Scostamento
+                                Spine Contate
+                              </th>
+                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Spine Attese
                               </th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Data Inserimento
@@ -287,7 +334,7 @@ const Acquisizioni = () => {
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
                             {currentItems.map((item) => (
-                              <tr key={item.id} className="hover:bg-gray-50">
+                              <tr key={item.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(item)}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                   {item.id}
                                 </td>
@@ -306,12 +353,17 @@ const Acquisizioni = () => {
                                   </span>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  {item.scostamentO_CQ_ARTICOLO}%
+                                  {/* Spine Contate */}
+                                  {item.numSpineContate ?? item.num_spine_contate ?? 0}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                  {/* Spine Attese */}
+                                  {item.numSpineAttese ?? item.num_spine_attese ?? 'N/A'}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                   <div className="flex items-center">
                                     <Calendar className="w-4 h-4 mr-1 text-gray-400" />
-                                    {new Date(item.dT_INS).toLocaleString('it-IT')}
+                                    {item.dT_INS ? new Date(item.dT_INS).toLocaleString('it-IT') : '-'}
                                   </div>
                                 </td>
                               </tr>
@@ -325,7 +377,7 @@ const Acquisizioni = () => {
                     <div className="md:hidden flex-1 overflow-y-auto px-1">
                       <div className="space-y-3 pb-4">
                         {currentItems.map((item) => (
-                          <div key={item.id} className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
+                          <div key={item.id} className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer" onClick={() => openDetail(item)}>
                             {/* Status Header */}
                             <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 rounded-t-lg border-b border-gray-200">
                               <div className="flex items-center justify-between">
@@ -381,12 +433,16 @@ const Acquisizioni = () => {
                                   </span>
                                 </div>
 
-                                {/* Percentage Badge */}
-                                <div className="flex justify-center pt-1">
-                                  <span className="flex items-center justify-between py-2 px-3 bg-purple-50 rounded-lg border border-purple-100">
-    
-                                    {item.scostamentO_CQ_ARTICOLO}%
-                                  </span>
+                             
+                                <div className="flex justify-between gap-3 pt-1">
+                                  <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg border border-purple-100">
+                                    <span className="text-xs text-gray-600">Spine Contate</span>
+                                    <strong className="text-sm text-gray-900">{item.numSpineContate ?? item.num_spine_contate ?? 0}</strong>
+                                  </div>
+                                  <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg border border-purple-100">
+                                    <span className="text-xs text-gray-600">Spine Attese</span>
+                                    <strong className="text-sm text-gray-900">{item.numSpineAttese ?? item.num_spine_attese ?? 'N/A'}</strong>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -500,6 +556,106 @@ const Acquisizioni = () => {
           )}
         </div>
       )}
+      {/* Detail modal */}
+      <Modal open={detailOpen} title={detailItem ? `Acquisizione ${detailItem.codicE_ARTICOLO}` : ''} onBackdropClick={closeDetail} footer={<button onClick={closeDetail} className="px-3 py-1 bg-blue-600 text-white rounded">Chiudi</button>}>
+        {detailItem ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                {/* single-photo block */}
+                <div className="mt-6 w-full max-w-xl mx-auto">
+                
+                  <div className="rounded border overflow-hidden bg-white">
+                    {(() => {
+                      if (!detailItem) return null;
+                      const s = String(detailItem.fotoAcquisizione || detailItem.fotoAcquisizione || '');
+                      const parts = s.split('/').filter(Boolean);
+                      const name = parts.length ? parts[parts.length - 1] : '';
+                      if (!name) return (
+                        <div className="flex flex-col items-center justify-center h-56 bg-gray-50 text-gray-400 p-4">
+                          <Camera className="w-12 h-12 mb-2" />
+                          <div className="text-sm">Immagine non disponibile</div>
+                        </div>
+                      );
+                      const base = (import.meta.env.VITE_API_BASE_URL || window.location.origin).replace(/\/+$/, '');
+                      const displayPhoto = `${base}/api/images/public/${encodeURIComponent(name)}`;
+
+                      return (
+                        <>
+                          {!imgError && (
+                            <div className="relative">
+                              {!imgLoaded && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+                                  <div className="animate-pulse flex items-center gap-3 text-gray-400">
+                                    <Camera className="w-6 h-6" />
+                                    <span>Caricamento immagine…</span>
+                                  </div>
+                                </div>
+                              )}
+                              <img
+                                src={displayPhoto}
+                                alt="Foto acquisizione"
+                                className={`w-full h-56 object-cover cursor-pointer transition-transform duration-300 ${imgLoaded ? 'transform hover:scale-105' : ''}`}
+                                onClick={() => setIsLightboxOpen(true)}
+                                onLoad={() => setImgLoaded(true)}
+                                onError={() => setImgError(true)}
+                              />
+                              <div className="absolute left-2 top-2 bg-black bg-opacity-40 text-white text-xs px-2 py-1 rounded">{decodeURIComponent(displayPhoto.split('/').pop() || '')}</div>
+                            </div>
+                          )}
+                          {imgError && (
+                            <div className="flex flex-col items-center justify-center h-56 bg-gray-50 text-gray-400 p-4">
+                              <Camera className="w-12 h-12 mb-2" />
+                              <div className="text-sm">Immagine non disponibile</div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Lightbox modal */}
+                  {isLightboxOpen && detailItem && (() => {
+                    const filename = String(detailItem.fotoAcquisizione || '').split('/').filter(Boolean).pop();
+                    if (!filename) return null;
+                    const base = (import.meta.env.VITE_API_BASE_URL || window.location.origin).replace(/\/+$/, '');
+                    const displayPhoto = `${base}/api/images/public/${encodeURIComponent(filename)}`;
+                    return (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70" onClick={() => setIsLightboxOpen(false)}>
+                        <div className="max-w-[90%] max-h-[90%]" onClick={(e) => e.stopPropagation()}>
+                          <img src={displayPhoto} alt="Foto ingrandita" className="w-full h-auto max-h-[90vh] object-contain rounded shadow-lg" />
+                          <div className="text-right mt-2">
+                            <button onClick={() => setIsLightboxOpen(false)} className="px-3 py-1 bg-white text-gray-800 rounded">Chiudi</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div><strong>Codice Articolo:</strong> {detailItem.codicE_ARTICOLO ?? detailItem.codiceArticolo}</div>
+                <div><strong>Codice Ordine:</strong> {detailItem.codicE_ORDINE}</div>
+                <div><strong>ID Catasta:</strong> {detailItem.idCatasta ?? detailItem.idCatasta}</div>
+                <div><strong>Linea:</strong> {detailItem.codLinea ?? detailItem.codLinea ?? detailItem.codicE_LINEA}</div>
+                <div><strong>Postazione:</strong> {detailItem.codPostazione ?? detailItem.codicE_POSTAZIONE}</div>
+                <div><strong>Abilita CQ:</strong> {detailItem.abilitaCq !== undefined ? (detailItem.abilitaCq ? 'Sì' : 'No') : (detailItem.abilitA_CQ ? 'Sì' : 'No')}</div>
+                <div><strong>Esito CQ Articolo:</strong> {detailItem.esitoCqArticolo ?? detailItem.esitO_CQ_ARTICOLO ?? 'N/A'}</div>
+                <div><strong>Spine Contate:</strong> {detailItem.numSpineContate ?? detailItem.num_spine_contate ?? 0}</div>
+                <div><strong>Spine Attese:</strong> {detailItem.numSpineAttese ?? detailItem.num_spine_attese ?? 'N/A'}</div>
+                <div><strong>Data Inserimento:</strong> {detailItem.dT_INS ? new Date(detailItem.dT_INS).toLocaleString('it-IT') : '-'}</div>
+              </div>
+            </div>
+
+           
+              <div>
+                <h4 className="font-semibold">Descrizione</h4>
+                <p className="text-sm text-gray-700">{detailItem.descrizione}</p>
+              </div>
+          
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 };
