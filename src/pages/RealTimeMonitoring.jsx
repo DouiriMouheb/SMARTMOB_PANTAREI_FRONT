@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useLineePostazioni } from '../hooks/useLineePostazioni';
 import useAcquisizioniRealtime from '../hooks/useAcquisizioniRealTime';
+import ApiService from '../services/ApiService';
 
 const RealtimeLatestSingle = () => {
   const [selectedLinea, setSelectedLinea] = useState('');
@@ -20,12 +21,13 @@ const RealtimeLatestSingle = () => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  // simulated forwarder state
-  const [newImage, setNewImage] = useState(null);
-  const [forwardLoading, setForwardLoading] = useState(false);
-  const [forwardError, setForwardError] = useState(null);
+  // analyzed photo modal state
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  const [analyzedImage, setAnalyzedImage] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState(null);
   // ref to track object URLs created from blobs so we can revoke them and avoid memory leaks
-  const newImageObjectUrlRef = useRef(null);
+  const analyzedImageObjectUrlRef = useRef(null);
 
   const { loading: dropdownLoading, error: dropdownError, getLinee, getPostazioniForLinea } = useLineePostazioni();
 
@@ -199,96 +201,49 @@ const RealtimeLatestSingle = () => {
     if (imageUrl) window.open(imageUrl, '_blank');
   };
 
-  // Simulate forwarding the current image to a second API and show the returned/processed image.
-  const handleForward = async () => {
-    setForwardError(null);
-    setForwardLoading(true);
-    setNewImage(null);
+  // Analyze photo via QualityControlVisual API (server-side relay, no CORS)
+  const handleAnalyzePhoto = async () => {
+    setAnalysisError(null);
+    setAnalysisLoading(true);
+    setAnalyzedImage(null);
+    setIsAnalysisModalOpen(true); // Open modal immediately
 
-    // use the currently computed displayPhoto; if none available, we still allow a configured forward URL to be used
-    const sourceUrl = displayPhoto || null;
-
-    // use env if set, otherwise default to the QualityControlVisual endpoint you showed in Postman
-    const forwardUrl = import.meta.env.VITE_FORWARD_URL || 'http://192.168.1.118:8000/QualityControlVisual';
-
-    // helper to extract a sensible filename from the displayPhoto url
-    const deriveFilename = (url) => {
-      try {
-        if (!url) return 'image.jpg';
-        const parts = String(url).split('/').filter(Boolean);
-        return decodeURIComponent(parts[parts.length - 1] || 'image.jpg');
-      } catch {
-        return 'image.jpg';
-      }
-    };
+    // Extract just the filename from singlePhoto
+    const filename = (() => {
+      if (!singlePhoto) return null;
+      const s = String(singlePhoto || '');
+      const parts = s.split('/').filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : null;
+    })();
 
     try {
-      if (!sourceUrl) {
-        // if there's no image to fetch locally, still attempt a POST without a file (server may accept URLs) - but prefer to fail fast
-        throw new Error('Nessuna immagine disponibile da inoltrare');
+      if (!filename) {
+        throw new Error('Nessuna immagine disponibile da analizzare');
       }
 
-      // fetch source image as blob
-      const resp = await fetch(sourceUrl);
-      if (!resp.ok) throw new Error(`Unable to fetch source image: ${resp.status}`);
-      const blob = await resp.blob();
+      // eslint-disable-next-line no-console
+      console.log('[Analysis] Sending filename to server-side relay:', filename);
 
-      // forward to the configured endpoint (field name "image" to match your Postman)
-      // always send the blob (server expects file bytes). Also include filename metadata.
-      const formData = new FormData();
-      formData.append('image', blob, deriveFilename(displayPhoto));
-      try {
-        formData.append('filename', deriveFilename(displayPhoto));
-      } catch (e) {
-        // ignore
-      }
+      // Call backend relay endpoint - server fetches image and posts to QualityControlVisual
+      const resultBlob = await ApiService.forwardImageToQualityControl(filename);
+      
+      // eslint-disable-next-line no-console
+      console.log('[Analysis] Received analyzed image. Size:', resultBlob.size, 'bytes, Type:', resultBlob.type);
 
-      const uploadResp = await fetch(forwardUrl, { method: 'POST', body: formData });
-      if (!uploadResp.ok) throw new Error(`Forward failed: ${uploadResp.status}`);
-
-      const contentType = uploadResp.headers.get('content-type') || '';
-
-      // server may return binary image (image/*) or JSON (e.g. base64 or url). handle both.
-      if (contentType.includes('application/json')) {
-        const json = await uploadResp.json();
-        // common patterns: returned image as base64 data URI or a URL field
-        if (json.image && typeof json.image === 'string' && /^data:image/.test(json.image)) {
-          const res = await fetch(json.image);
-          const resultBlob = await res.blob();
-          const objectURL = URL.createObjectURL(resultBlob);
-          // revoke previous object URL if any, then set the new one
-          try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
-          newImageObjectUrlRef.current = objectURL;
-          setNewImage(objectURL);
-        } else if (json.image && typeof json.image === 'string') {
-          // maybe a URL (remote); do not treat as blob-created object URL
-          setNewImage(json.image);
-        } else if (json.data && typeof json.data === 'string' && /^data:image/.test(json.data)) {
-          const res = await fetch(json.data);
-          const resultBlob = await res.blob();
-          const objectURL = URL.createObjectURL(resultBlob);
-          try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
-          newImageObjectUrlRef.current = objectURL;
-          setNewImage(objectURL);
-        } else {
-          setForwardError('Risposta JSON inattesa dal server');
-          // eslint-disable-next-line no-console
-          console.warn('Forward JSON response:', json);
-        }
-      } else {
-        // assume binary image returned
-        const resultBlob = await uploadResp.blob();
-        const objectURL = URL.createObjectURL(resultBlob);
-        try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
-        newImageObjectUrlRef.current = objectURL;
-        setNewImage(objectURL);
-      }
+      // Create object URL for display
+      const objectURL = URL.createObjectURL(resultBlob);
+      try { if (analyzedImageObjectUrlRef.current) URL.revokeObjectURL(analyzedImageObjectUrlRef.current); } catch (e) {}
+      analyzedImageObjectUrlRef.current = objectURL;
+      setAnalyzedImage(objectURL);
+      
+      // eslint-disable-next-line no-console
+      console.log('[Analysis] ✓ Success: Analyzed image ready');
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('Forward image error', err);
-      setForwardError(String(err?.message || err));
+      console.error('[Analysis] ✗ Error:', err);
+      setAnalysisError(String(err?.message || err));
     } finally {
-      setForwardLoading(false);
+      setAnalysisLoading(false);
     }
   };
 
@@ -296,7 +251,7 @@ const RealtimeLatestSingle = () => {
   useEffect(() => {
     return () => {
       try {
-        if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current);
+        if (analyzedImageObjectUrlRef.current) URL.revokeObjectURL(analyzedImageObjectUrlRef.current);
       } catch (e) {
         // ignore
       }
@@ -465,19 +420,17 @@ const RealtimeLatestSingle = () => {
                       <h4 className="text-lg font-semibold text-gray-700">Foto Acquisizione</h4>
                       <button
                         type="button"
-                        onClick={handleForward}
-                        disabled={forwardLoading}
-                        className={`ml-2 inline-flex items-center px-3 py-1.5 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white ${forwardLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        onClick={handleAnalyzePhoto}
+                        disabled={!displayPhoto || analysisLoading}
+                        className={`ml-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white transition-colors ${
+                          !displayPhoto || analysisLoading
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : 'bg-red-600 hover:bg-red-700 focus:ring-2 focus:ring-red-500'
+                        }`}
                       >
-                        {forwardLoading ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Inoltra...
-                          </>
-                        ) : (
-                          'Forward Image'
-                        )}
+                        <Eye className="w-4 h-4 mr-2" />
+                        Analizza Foto
                       </button>
-                      {forwardError && <div className="text-red-500 text-sm ml-3">{forwardError}</div>}
                     </div>
                     <div className="rounded border overflow-hidden bg-white">
                       {displayPhoto && !imgError ? (
@@ -508,7 +461,7 @@ const RealtimeLatestSingle = () => {
                       )}
                     </div>
 
-                    {/* Lightbox modal */}
+                    {/* Lightbox modal for original image */}
                     {isLightboxOpen && displayPhoto && (
                       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70" onClick={() => setIsLightboxOpen(false)}>
                         <div className="max-w-[90%] max-h-[90%]" onClick={(e) => e.stopPropagation()}>
@@ -519,17 +472,92 @@ const RealtimeLatestSingle = () => {
                         </div>
                       </div>
                     )}
-                  </div>
 
-                  {/* processed image preview from forwarder */}
-                  {newImage && (
-                    <div className="mt-4 text-center">
-                      <h5 className="text-md font-semibold text-gray-700 mb-2">Processed Image</h5>
-                      <div className="rounded border overflow-hidden inline-block">
-                        <img src={newImage} alt="Processed" className="w-64 h-auto object-contain" />
+                    {/* Analysis modal popup */}
+                    {isAnalysisModalOpen && (
+                      <div className="fixed inset-0 backdrop-blur-md bg-black/20 flex items-center justify-center z-[100] p-2" onClick={() => setIsAnalysisModalOpen(false)}>
+                        <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                          {/* Modal Header */}
+                          <div className="px-4 py-3 border-b border-slate-200">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <Eye className="w-6 h-6 text-red-600" />
+                                <h3 className="text-lg font-bold text-black">Analisi Foto - Quality Control</h3>
+                              </div>
+                              <button
+                                onClick={() => setIsAnalysisModalOpen(false)}
+                                className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded-full hover:bg-gray-100"
+                              >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Modal Body */}
+                          <div className="flex-1 overflow-y-auto px-4 py-3">
+                            {analysisLoading && (
+                              <div className="flex flex-col items-center justify-center py-12">
+                                <Loader2 className="w-16 h-16 text-red-600 animate-spin mb-4" />
+                                <p className="text-lg text-gray-900 font-medium">Analisi in corso...</p>
+                                <p className="text-sm text-gray-600 mt-2">Elaborazione immagine tramite Quality Control API</p>
+                              </div>
+                            )}
+
+                            {analysisError && (
+                              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 flex items-start gap-4">
+                                <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-1" />
+                                <div>
+                                  <h4 className="text-red-800 font-semibold mb-2">Errore durante l'analisi</h4>
+                                  <p className="text-red-700">{analysisError}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {analyzedImage && !analysisLoading && (
+                              <div className="space-y-4">
+                                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+                                  <CheckCircle className="w-5 h-5 text-green-600" />
+                                  <p className="text-green-800 font-medium">Analisi completata con successo</p>
+                                </div>
+                                
+                                <div className="bg-gray-50 rounded-lg p-4 border-2 border-gray-200">
+                                  <img
+                                    src={analyzedImage}
+                                    alt="Foto analizzata"
+                                    className="w-full h-auto object-contain rounded shadow-lg"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Modal Footer */}
+                          <div className="bg-gray-50 px-4 py-3 border-t flex justify-end gap-2">
+                            <button
+                              onClick={() => setIsAnalysisModalOpen(false)}
+                              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                            >
+                              Chiudi
+                            </button>
+                            {analyzedImage && (
+                              <a
+                                href={analyzedImage}
+                                download="foto-analizzata.jpg"
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium inline-flex items-center gap-2"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Scarica
+                              </a>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-grow flex flex-col items-center justify-center lg:w-2/4">

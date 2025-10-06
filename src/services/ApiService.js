@@ -121,6 +121,30 @@ class ApiService {
     }
     return this.get(`/api/Acquisizioni/${codLinea}/${codPostazione}`)
   }
+
+  // Forward image to QualityControlVisual API (server-side relay to avoid CORS)
+  static async forwardImageToQualityControl(filename) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/QualityControl/forward`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ filename }),
+      })
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        throw new Error(`Quality control forward failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`)
+      }
+
+      // Return the processed image as blob
+      return await response.blob()
+    } catch (error) {
+      console.error('Quality Control Forward Error:', error)
+      throw error
+    }
+  }
 }
 
 export default ApiService
