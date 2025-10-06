@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import ApiService from '../services/ApiService'
+import { handleError } from '../utils/errorHandler'
 
 export const useAcquisizioni = () => {
   const [data, setData] = useState([])
@@ -13,8 +14,11 @@ export const useAcquisizioni = () => {
       const result = await ApiService.getAcquisizioni()
       setData(result)
     } catch (err) {
-      setError(err.message)
-      console.error('Error fetching acquisizioni:', err)
+      const parsedError = handleError(err, {
+        context: 'Caricamento acquisizioni',
+        showToast: true,
+      })
+      setError(parsedError.message)
     } finally {
       setLoading(false)
     }

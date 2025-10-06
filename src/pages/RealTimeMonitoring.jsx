@@ -14,6 +14,7 @@ import {
 import { useLineePostazioni } from '../hooks/useLineePostazioni';
 import useAcquisizioniRealtime from '../hooks/useAcquisizioniRealTime';
 import ApiService from '../services/ApiService';
+import { logError } from '../utils/errorHandler';
 
 const RealtimeLatestSingle = () => {
   const [selectedLinea, setSelectedLinea] = useState('');
@@ -64,7 +65,7 @@ const RealtimeLatestSingle = () => {
     try {
       if (typeof refreshData === 'function') refreshData(selectedLinea, selectedPostazione);
     } catch (e) {
-      // swallow - best effort
+      logError(e, 'RealTime: Refresh data failed');
     }
 
     try {
@@ -74,7 +75,7 @@ const RealtimeLatestSingle = () => {
         sendMessage('SubscribeToLineaPostazione', selectedLinea, selectedPostazione);
       }
     } catch (e) {
-      // swallow
+      logError(e, 'RealTime: Subscribe failed');
     }
 
     subscribedRef.current = { linea: selectedLinea, postazione: selectedPostazione };
@@ -102,7 +103,7 @@ const RealtimeLatestSingle = () => {
     try {
       if (typeof refreshData === 'function') refreshData(selectedLinea, selectedPostazione);
     } catch (e) {
-      // ignore
+      logError(e, 'RealTime: Auto-refresh failed');
     }
   }, [lastUpdated, recordCount, selectedLinea, selectedPostazione, refreshData]);
 
@@ -160,21 +161,15 @@ const RealtimeLatestSingle = () => {
     return fromLatest ?? '';
   })();
 
-  // DEBUG: log values to help diagnose why descrizione may be empty in the UI
+  // DEBUG: log values in development only
   useEffect(() => {
-    try {
-      // eslint-disable-next-line no-console
-      console.log('[RealtimeLatestSingle] selected:', { selectedLinea, selectedPostazione });
-      // eslint-disable-next-line no-console
-      console.log('[RealtimeLatestSingle] acquisizioni length:', Array.isArray(acquisizioni) ? acquisizioni.length : String(acquisizioni));
-      // eslint-disable-next-line no-console
-      console.log('[RealtimeLatestSingle] latestData keys:', latestData ? Object.keys(latestData) : null);
-      // eslint-disable-next-line no-console
-      console.log('[RealtimeLatestSingle] latestData (raw):', latestData);
-      // eslint-disable-next-line no-console
-      console.log('[RealtimeLatestSingle] descrizione (normalized):', descrizione);
-    } catch (e) {
-      // ignore logging errors
+    if (import.meta.env.DEV) {
+      console.log('[RealTime Debug]', {
+        selected: { selectedLinea, selectedPostazione },
+        acquisitionsCount: Array.isArray(acquisizioni) ? acquisizioni.length : 0,
+        hasLatestData: !!latestData,
+        descrizione,
+      });
     }
   }, [acquisizioni, latestData, descrizione, selectedLinea, selectedPostazione]);
 

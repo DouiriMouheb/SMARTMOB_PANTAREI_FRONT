@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import ApiService from '../services/ApiService'
+import { handleError } from '../utils/errorHandler'
 
 export const useLineePostazioni = () => {
   const [data, setData] = useState([])
@@ -13,8 +14,11 @@ export const useLineePostazioni = () => {
       const result = await ApiService.getPostazioniPerLinea()
       setData(result)
     } catch (err) {
-      setError(err.message)
-      console.error('Error fetching linee postazioni:', err)
+      const parsedError = handleError(err, {
+        context: 'Caricamento linee e postazioni',
+        showToast: true,
+      })
+      setError(parsedError.message)
     } finally {
       setLoading(false)
     }

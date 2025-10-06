@@ -1,7 +1,8 @@
 import toast from 'react-hot-toast';
+import { handleError } from '../utils/errorHandler';
 
 // Updated API base URL to match the correct server
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 class AcquisizioniService {
   constructor() {
@@ -67,8 +68,10 @@ class AcquisizioniService {
       const items = Array.isArray(data) ? data : [data];
       return items.map(item => this.normalizeAcquisizione(item));
     } catch (error) {
-      console.error('Error fetching latest acquisizioni:', error);
-      toast.error(`Errore nel caricamento dei dati: ${error.message}`);
+      handleError(error, {
+        context: 'Caricamento ultimi dati',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -91,12 +94,14 @@ class AcquisizioniService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-  const data = await response.json();
-  const items = Array.isArray(data) ? data : [data];
-  return items.map(item => this.normalizeAcquisizione(item));
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : [data];
+      return items.map(item => this.normalizeAcquisizione(item));
     } catch (error) {
-      console.error('Error fetching latest single acquisizione:', error);
-      toast.error(`Errore nel caricamento dei dati: ${error.message}`);
+      handleError(error, {
+        context: 'Caricamento dati singola acquisizione',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -117,8 +122,10 @@ class AcquisizioniService {
 
       return await response.json();
     } catch (error) {
-      console.error('Error fetching acquisizione by ID:', error);
-      toast.error(`Errore nel caricamento dell'acquisizione: ${error.message}`);
+      handleError(error, {
+        context: 'Caricamento acquisizione per ID',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -139,8 +146,10 @@ class AcquisizioniService {
 
       return await response.json();
     } catch (error) {
-      console.error('Error fetching acquisizioni:', error);
-      toast.error(`Errore nel caricamento delle acquisizioni: ${error.message}`);
+      handleError(error, {
+        context: 'Caricamento acquisizioni',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -166,8 +175,10 @@ class AcquisizioniService {
 
       return await response.json();
     } catch (error) {
-      console.error('Error fetching acquisizioni by date range:', error);
-      toast.error(`Errore nel caricamento delle acquisizioni per periodo: ${error.message}`);
+      handleError(error, {
+        context: 'Caricamento acquisizioni per periodo',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -188,8 +199,10 @@ class AcquisizioniService {
 
       return await response.blob();
     } catch (error) {
-      console.error('Error exporting acquisizioni:', error);
-      toast.error(`Errore nell'esportazione: ${error.message}`);
+      handleError(error, {
+        context: 'Esportazione acquisizioni',
+        showToast: true,
+      });
       throw error;
     }
   }
@@ -206,7 +219,9 @@ class AcquisizioniService {
 
       return response.ok;
     } catch (error) {
-      console.error('Health check failed:', error);
+      if (import.meta.env.DEV) {
+        console.warn('Health check failed:', error);
+      }
       return false;
     }
   }
@@ -223,7 +238,9 @@ class AcquisizioniService {
 
       return response.ok;
     } catch (error) {
-      console.error('SignalR validation failed:', error);
+      if (import.meta.env.DEV) {
+        console.warn('SignalR validation failed:', error);
+      }
       return false;
     }
   }

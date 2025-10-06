@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import * as signalR from '@microsoft/signalr';
 import toast from 'react-hot-toast';
 import acquisizioniService from '../services/acquisizioniService';
+import { handleError, logError } from '../utils/errorHandler';
 
 // Updated API base URL to match the correct server
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ;
@@ -101,9 +102,11 @@ const useAcquisizioniRealtime = () => {
       setLastUpdated(new Date().toISOString());
       
     } catch (err) {
-      console.error('Error fetching initial data:', err);
-      setError(`Errore nel caricamento dei dati: ${err.message}`);
-      // Don't show error toast here as it's already shown in the service
+      const parsedError = handleError(err, {
+        context: 'Caricamento dati realtime',
+        showToast: false, // Don't show toast for initial load, component will display error
+      });
+      setError(parsedError.message);
     } finally {
       setIsLoading(false);
     }

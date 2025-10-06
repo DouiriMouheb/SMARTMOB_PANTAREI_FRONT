@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import ApiService from '../services/ApiService'
 import toast from 'react-hot-toast'
+import { handleError } from '../utils/errorHandler'
 
 export const usePostazioni = () => {
   const [data, setData] = useState([])
@@ -14,9 +15,12 @@ export const usePostazioni = () => {
       const result = await ApiService.getPostazioni()
       setData(result)
     } catch (err) {
-      setError(err.message)
+      const parsedError = handleError(err, {
+        context: 'Caricamento postazioni',
+        showToast: true,
+      })
+      setError(parsedError.message)
       setData([]) // Always set data to empty array on error
-      console.error('Error fetching postazioni:', err)
     } finally {
       setLoading(false)
     }
@@ -29,7 +33,10 @@ export const usePostazioni = () => {
       toast.success('Postazione creata con successo!')
       return newPostazione
     } catch (err) {
-      toast.error(`Errore nella creazione: ${err.message}`)
+      handleError(err, {
+        context: 'Creazione postazione',
+        showToast: true,
+      })
       throw err
     }
   }
@@ -45,7 +52,10 @@ export const usePostazioni = () => {
       toast.success('Postazione aggiornata con successo!')
       return updatedPostazione
     } catch (err) {
-      toast.error(`Errore nell'aggiornamento: ${err.message}`)
+      handleError(err, {
+        context: 'Aggiornamento postazione',
+        showToast: true,
+      })
       throw err
     }
   }
@@ -58,7 +68,10 @@ export const usePostazioni = () => {
       ))
       toast.success('Postazione eliminata con successo!')
     } catch (err) {
-      toast.error(`Errore nell'eliminazione: ${err.message}`)
+      handleError(err, {
+        context: 'Eliminazione postazione',
+        showToast: true,
+      })
       throw err
     }
   }

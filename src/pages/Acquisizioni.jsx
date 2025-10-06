@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Modal from '../components/Modal';
-import { Database, ChevronDown, Loader2, AlertCircle, Calendar, Package, Eye, ChevronLeft, ChevronRight, Search, X, FileBox, Newspaper, Camera } from 'lucide-react';
+import { Database, ChevronDown, Loader2, AlertCircle, Calendar, Package, Eye, ChevronLeft, ChevronRight, Search, X, FileBox, Newspaper, Camera, CheckCircle } from 'lucide-react';
 import { useLineePostazioni } from '../hooks/useLineePostazioni';
 import { useAcquisizioniFilter } from '../hooks/useAcquisizioniFilter';
+import ApiService from '../services/ApiService';
+import { handleError, logError } from '../utils/errorHandler';
 
 const Acquisizioni = () => {
   const [selectedLinea, setSelectedLinea] = useState('');
@@ -103,6 +105,14 @@ const Acquisizioni = () => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
 
+  // Analysis modal state
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  const [analyzedImage, setAnalyzedImage] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState(null);
+  const [currentAnalyzingItem, setCurrentAnalyzingItem] = useState(null);
+  const analyzedImageObjectUrlRef = useRef(null);
+
   const openDetail = (item) => {
     setDetailItem(item);
     setDetailOpen(true);
@@ -112,6 +122,71 @@ const Acquisizioni = () => {
     setDetailOpen(false);
     setDetailItem(null);
   };
+
+  // Analyze photo via QualityControlVisual API
+  const handleAnalyzePhoto = async (item) => {
+    setAnalysisError(null);
+    setAnalysisLoading(true);
+    setAnalyzedImage(null);
+    setCurrentAnalyzingItem(item);
+    setIsAnalysisModalOpen(true);
+
+    const filename = (() => {
+      const photoField = item.fotoAcquisizione || item.fotO_SUPERIORE || item.fotO_FRONTALE;
+      if (!photoField) return null;
+      const s = String(photoField || '');
+      const parts = s.split('/').filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : null;
+    })();
+
+    try {
+      if (!filename) {
+        throw new Error('Nessuna immagine disponibile da analizzare');
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('[Analysis] Sending filename:', filename);
+      }
+      
+      const resultBlob = await ApiService.forwardImageToQualityControl(filename);
+      
+      if (import.meta.env.DEV) {
+        console.log('[Analysis] Received analyzed image');
+      }
+
+      const objectURL = URL.createObjectURL(resultBlob);
+      try { 
+        if (analyzedImageObjectUrlRef.current) {
+          URL.revokeObjectURL(analyzedImageObjectUrlRef.current);
+        }
+      } catch (e) {
+        logError(e, 'Failed to revoke previous analyzed image URL');
+      }
+      analyzedImageObjectUrlRef.current = objectURL;
+      setAnalyzedImage(objectURL);
+    } catch (err) {
+      const parsedError = handleError(err, {
+        context: 'Analisi immagine',
+        showToast: false, // Error shown in modal
+      });
+      setAnalysisError(parsedError.message);
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  // Cleanup analyzed image on unmount
+  useEffect(() => {
+    return () => {
+      try {
+        if (analyzedImageObjectUrlRef.current) {
+          URL.revokeObjectURL(analyzedImageObjectUrlRef.current);
+        }
+      } catch (e) {
+        logError(e, 'Failed to cleanup analyzed image URL on unmount');
+      }
+    };
+  }, []);
 
   return (
     <div className="p-3 sm:p-6">
@@ -444,6 +519,20 @@ const Acquisizioni = () => {
                                     <strong className="text-sm text-gray-900">{item.numSpineAttese ?? item.num_spine_attese ?? 'N/A'}</strong>
                                   </div>
                                 </div>
+
+                                {/* Analizza Foto Button */}
+                                {(item.fotoAcquisizione || item.fotO_SUPERIORE || item.fotO_FRONTALE) && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAnalyzePhoto(item);
+                                    }}
+                                    className="w-full mt-3 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition-colors"
+                                  >
+                                    <Eye className="w-4 h-4 mr-2" />
+                                    Analizza Foto
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -632,6 +721,17 @@ const Acquisizioni = () => {
                     );
                   })()}
                 </div>
+
+                {/* Analizza Foto Button in Detail Modal */}
+                {(detailItem.fotoAcquisizione || detailItem.fotO_SUPERIORE || detailItem.fotO_FRONTALE) && (
+                  <button
+                    onClick={() => handleAnalyzePhoto(detailItem)}
+                    className="w-full mt-3 inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition-colors"
+                  >
+                    <Eye className="w-4 h-4 mr-2" />
+                    Analizza Foto
+                  </button>
+                )}
               </div>
               <div className="space-y-2">
                 <div><strong>Codice Articolo:</strong> {detailItem.codicE_ARTICOLO ?? detailItem.codiceArticolo}</div>
@@ -656,6 +756,93 @@ const Acquisizioni = () => {
           </div>
         ) : null}
       </Modal>
+
+      {/* Analysis Modal */}
+      {isAnalysisModalOpen && (
+        <div className="fixed inset-0 backdrop-blur-md bg-black/20 flex items-center justify-center z-[100] p-2" onClick={() => setIsAnalysisModalOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="px-4 py-3 border-b border-slate-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Eye className="w-6 h-6 text-red-600" />
+                  <h3 className="text-lg font-bold text-black">
+                    Analisi Foto - {currentAnalyzingItem?.codicE_ARTICOLO || 'N/A'}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setIsAnalysisModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded-full hover:bg-gray-100"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {analysisLoading && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="w-16 h-16 text-red-600 animate-spin mb-4" />
+                  <p className="text-lg text-gray-900 font-medium">Analisi in corso...</p>
+                  <p className="text-sm text-gray-600 mt-2">Elaborazione immagine tramite Quality Control API</p>
+                </div>
+              )}
+
+              {analysisError && (
+                <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 flex items-start gap-4">
+                  <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-1" />
+                  <div>
+                    <h4 className="text-red-800 font-semibold mb-2">Errore durante l'analisi</h4>
+                    <p className="text-red-700">{analysisError}</p>
+                  </div>
+                </div>
+              )}
+
+              {analyzedImage && !analysisLoading && (
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    <p className="text-green-800 font-medium">Analisi completata con successo</p>
+                  </div>
+                  
+                  <div className="bg-gray-50 rounded-lg p-4 border-2 border-gray-200">
+                    <img
+                      src={analyzedImage}
+                      alt="Foto analizzata"
+                      className="w-full h-auto object-contain rounded shadow-lg"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-4 py-3 border-t flex justify-end gap-2">
+              <button
+                onClick={() => setIsAnalysisModalOpen(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+              >
+                Chiudi
+              </button>
+              {analyzedImage && (
+                <a
+                  href={analyzedImage}
+                  download="foto-analizzata.jpg"
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium inline-flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Scarica
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
