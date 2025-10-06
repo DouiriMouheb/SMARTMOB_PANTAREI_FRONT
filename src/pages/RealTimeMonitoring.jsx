@@ -20,6 +20,12 @@ const RealtimeLatestSingle = () => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  // simulated forwarder state
+  const [newImage, setNewImage] = useState(null);
+  const [forwardLoading, setForwardLoading] = useState(false);
+  const [forwardError, setForwardError] = useState(null);
+  // ref to track object URLs created from blobs so we can revoke them and avoid memory leaks
+  const newImageObjectUrlRef = useRef(null);
 
   const { loading: dropdownLoading, error: dropdownError, getLinee, getPostazioniForLinea } = useLineePostazioni();
 
@@ -193,6 +199,110 @@ const RealtimeLatestSingle = () => {
     if (imageUrl) window.open(imageUrl, '_blank');
   };
 
+  // Simulate forwarding the current image to a second API and show the returned/processed image.
+  const handleForward = async () => {
+    setForwardError(null);
+    setForwardLoading(true);
+    setNewImage(null);
+
+    // use the currently computed displayPhoto; if none available, we still allow a configured forward URL to be used
+    const sourceUrl = displayPhoto || null;
+
+    // use env if set, otherwise default to the QualityControlVisual endpoint you showed in Postman
+    const forwardUrl = import.meta.env.VITE_FORWARD_URL || 'http://192.168.1.118:8000/QualityControlVisual';
+
+    // helper to extract a sensible filename from the displayPhoto url
+    const deriveFilename = (url) => {
+      try {
+        if (!url) return 'image.jpg';
+        const parts = String(url).split('/').filter(Boolean);
+        return decodeURIComponent(parts[parts.length - 1] || 'image.jpg');
+      } catch {
+        return 'image.jpg';
+      }
+    };
+
+    try {
+      if (!sourceUrl) {
+        // if there's no image to fetch locally, still attempt a POST without a file (server may accept URLs) - but prefer to fail fast
+        throw new Error('Nessuna immagine disponibile da inoltrare');
+      }
+
+      // fetch source image as blob
+      const resp = await fetch(sourceUrl);
+      if (!resp.ok) throw new Error(`Unable to fetch source image: ${resp.status}`);
+      const blob = await resp.blob();
+
+      // forward to the configured endpoint (field name "image" to match your Postman)
+      // always send the blob (server expects file bytes). Also include filename metadata.
+      const formData = new FormData();
+      formData.append('image', blob, deriveFilename(displayPhoto));
+      try {
+        formData.append('filename', deriveFilename(displayPhoto));
+      } catch (e) {
+        // ignore
+      }
+
+      const uploadResp = await fetch(forwardUrl, { method: 'POST', body: formData });
+      if (!uploadResp.ok) throw new Error(`Forward failed: ${uploadResp.status}`);
+
+      const contentType = uploadResp.headers.get('content-type') || '';
+
+      // server may return binary image (image/*) or JSON (e.g. base64 or url). handle both.
+      if (contentType.includes('application/json')) {
+        const json = await uploadResp.json();
+        // common patterns: returned image as base64 data URI or a URL field
+        if (json.image && typeof json.image === 'string' && /^data:image/.test(json.image)) {
+          const res = await fetch(json.image);
+          const resultBlob = await res.blob();
+          const objectURL = URL.createObjectURL(resultBlob);
+          // revoke previous object URL if any, then set the new one
+          try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
+          newImageObjectUrlRef.current = objectURL;
+          setNewImage(objectURL);
+        } else if (json.image && typeof json.image === 'string') {
+          // maybe a URL (remote); do not treat as blob-created object URL
+          setNewImage(json.image);
+        } else if (json.data && typeof json.data === 'string' && /^data:image/.test(json.data)) {
+          const res = await fetch(json.data);
+          const resultBlob = await res.blob();
+          const objectURL = URL.createObjectURL(resultBlob);
+          try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
+          newImageObjectUrlRef.current = objectURL;
+          setNewImage(objectURL);
+        } else {
+          setForwardError('Risposta JSON inattesa dal server');
+          // eslint-disable-next-line no-console
+          console.warn('Forward JSON response:', json);
+        }
+      } else {
+        // assume binary image returned
+        const resultBlob = await uploadResp.blob();
+        const objectURL = URL.createObjectURL(resultBlob);
+        try { if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current); } catch (e) {}
+        newImageObjectUrlRef.current = objectURL;
+        setNewImage(objectURL);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Forward image error', err);
+      setForwardError(String(err?.message || err));
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  // cleanup object URL on unmount
+  useEffect(() => {
+    return () => {
+      try {
+        if (newImageObjectUrlRef.current) URL.revokeObjectURL(newImageObjectUrlRef.current);
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
+
   const getQualityStatus = (esito) => {
     if (esito === null || esito === undefined) return { color: 'bg-gray-400', text: 'NON TESTATO', icon: '-' };
     return esito ? { color: 'bg-green-500', text: 'APPROVATO', icon: '✓' } : { color: 'bg-red-500', text: 'RESPINTO', icon: '✗' };
@@ -351,7 +461,24 @@ const RealtimeLatestSingle = () => {
                   </div>
                   {/* single-photo block */}
                   <div className="mt-6 w-full max-w-xl mx-auto">
-                    <h4 className="text-lg font-semibold text-gray-700 mb-3 text-center">Foto Acquisizione</h4>
+                    <div className="flex items-center justify-center gap-3 mb-3">
+                      <h4 className="text-lg font-semibold text-gray-700">Foto Acquisizione</h4>
+                      <button
+                        type="button"
+                        onClick={handleForward}
+                        disabled={forwardLoading}
+                        className={`ml-2 inline-flex items-center px-3 py-1.5 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white ${forwardLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                      >
+                        {forwardLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Inoltra...
+                          </>
+                        ) : (
+                          'Forward Image'
+                        )}
+                      </button>
+                      {forwardError && <div className="text-red-500 text-sm ml-3">{forwardError}</div>}
+                    </div>
                     <div className="rounded border overflow-hidden bg-white">
                       {displayPhoto && !imgError ? (
                         <div className="relative">
@@ -393,6 +520,16 @@ const RealtimeLatestSingle = () => {
                       </div>
                     )}
                   </div>
+
+                  {/* processed image preview from forwarder */}
+                  {newImage && (
+                    <div className="mt-4 text-center">
+                      <h5 className="text-md font-semibold text-gray-700 mb-2">Processed Image</h5>
+                      <div className="rounded border overflow-hidden inline-block">
+                        <img src={newImage} alt="Processed" className="w-64 h-auto object-contain" />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex-grow flex flex-col items-center justify-center lg:w-2/4">
